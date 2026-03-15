@@ -31,6 +31,8 @@ import bittensor as bt
 from verinet.protocol import FactVerification
 from verinet.scoring import compute_miner_scores
 from benchmarks.fever_loader import FEVERLoader
+from waap import WaaPClient, AGENT_WEIGHT_BOOST
+from passport import PassportClient, NetworkType, HUMAN_WEIGHT_BOOST
 
 
 class FactVerificationValidator:
@@ -79,23 +81,95 @@ class FactVerificationValidator:
         stats = self.fever_loader.stats()
         bt.logging.info(f"Benchmark loaded: {stats['total_claims']} claims available.")
 
-        # Human verification state (WaaP integration)
-        self.human_verified = self._check_human_verification()
-
-    def _check_human_verification(self) -> bool:
-        """
-        Check if this validator has been verified as human via WaaP CLI.
-        This is optional but gives priority in the network.
-        """
-        waap_marker = os.path.expanduser("~/.waap/verified")
-        if os.path.exists(waap_marker):
-            bt.logging.info("Human verification: VERIFIED via WaaP.")
-            return True
-        bt.logging.info(
-            "Human verification: NOT VERIFIED. "
-            "Run 'npx @human.tech/waap-cli verify' for priority."
+        # Agent authentication (WaaP integration)
+        self.waap = WaaPClient(
+            hotkey_ss58=self.wallet.hotkey.ss58_address
         )
-        return False
+        self.agent_authenticated = self.waap.is_authenticated
+        if self.agent_authenticated:
+            bt.logging.info(
+                f"WaaP: AGENT AUTHENTICATED — weight boost {AGENT_WEIGHT_BOOST}x active"
+            )
+        else:
+            bt.logging.info(
+                "WaaP: NOT AUTHENTICATED — run './scripts/verify_human.sh' for agent setup"
+            )
+
+        # Human verification (Passport.xyz integration)
+        self.passport = PassportClient(NetworkType.OPTIMISM)
+        # For demo purposes, use a static address -> UID mapping
+        # In production, this would be stored/retrieved from on-chain metadata
+        self.address_to_uid = {}
+        self.verified_human_addresses = set()
+        bt.logging.info("Passport.xyz: Human verification system initialized")
+
+    def get_authenticated_uids(self) -> typing.Set[int]:
+        """
+        Return the set of UIDs that have authenticated WaaP agents.
+        In a full deployment this queries on-chain agent attestations.
+        For local mode, only this validator's UID is tracked.
+        """
+        authenticated = set()
+        if self.agent_authenticated:
+            authenticated.add(self.uid)
+        return authenticated
+
+    def get_verified_human_uids(self) -> typing.Set[int]:
+        """
+        Return the set of UIDs that have verified human identity through Passport.xyz.
+        In a full deployment this would query on-chain human attestations.
+        For local mode, uses a static mapping of verified addresses.
+        """
+        verified_uids = set()
+        for address in self.verified_human_addresses:
+            uid = self.address_to_uid.get(address)
+            if uid is not None:
+                verified_uids.add(uid)
+        return verified_uids
+
+    async def update_human_verifications(self) -> None:
+        """
+        Update human verification status for known addresses.
+        In production, this would check all miner addresses against Passport.xyz.
+        """
+        if not self.address_to_uid:
+            # For demo, create a sample mapping - replace with real address discovery
+            bt.logging.debug("No address->UID mappings available for human verification")
+            return
+
+        try:
+            # Check verification status for addresses we know about
+            addresses_to_check = list(self.address_to_uid.keys())
+            if addresses_to_check:
+                async with self.passport as client:
+                    tasks = [client.get_full_status(addr) for addr in addresses_to_check]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                    new_verified = set()
+                    for addr, result in zip(addresses_to_check, results):
+                        if isinstance(result, Exception):
+                            bt.logging.warning(f"Human verification check failed for {addr}: {result}")
+                            continue
+
+                        if result.is_verified:
+                            new_verified.add(addr)
+                            bt.logging.debug(
+                                f"Human verified: {addr} ({result.verification_count}/3 verifications)"
+                            )
+
+                    # Update verified set
+                    prev_count = len(self.verified_human_addresses)
+                    self.verified_human_addresses = new_verified
+                    new_count = len(self.verified_human_addresses)
+
+                    if new_count != prev_count:
+                        bt.logging.info(
+                            f"Human verification status updated: {new_count} verified addresses "
+                            f"(was {prev_count})"
+                        )
+
+        except Exception as e:
+            bt.logging.warning(f"Failed to update human verifications: {e}")
 
     def get_miner_uids(self) -> typing.List[int]:
         """
@@ -181,7 +255,7 @@ class FactVerificationValidator:
     def set_weights(self) -> None:
         """
         Set weights on the Bittensor network based on accumulated miner scores.
-        Weights are normalized to sum to 1.0.
+        Authenticated WaaP agents get a weight boost.
         """
         bt.logging.info("Setting weights on the network...")
 
@@ -195,6 +269,29 @@ class FactVerificationValidator:
             # Equal weights if no scores yet
             n = self.metagraph.n.item()
             weights = torch.ones(n, dtype=torch.float32) / n
+
+        # Apply WaaP agent boost
+        authenticated_uids = self.get_authenticated_uids()
+        if authenticated_uids:
+            weights_list = self.waap.apply_weight_boost(
+                weights.tolist(), authenticated_uids
+            )
+            weights = torch.tensor(weights_list, dtype=torch.float32)
+            bt.logging.info(
+                f"WaaP boost applied to {len(authenticated_uids)} authenticated agent(s)"
+            )
+
+        # Apply Passport.xyz human verification boost
+        verified_human_uids = self.get_verified_human_uids()
+        if verified_human_uids:
+            weights_list = self.passport.apply_human_boost(
+                weights.tolist(), self.verified_human_addresses, self.address_to_uid
+            )
+            weights = torch.tensor(weights_list, dtype=torch.float32)
+            bt.logging.info(
+                f"Passport.xyz boost applied to {len(verified_human_uids)} verified human(s) "
+                f"(boost: {HUMAN_WEIGHT_BOOST}x)"
+            )
 
         uids = torch.arange(len(weights), dtype=torch.int64)
 
@@ -254,10 +351,21 @@ class FactVerificationValidator:
                         new_scores[:len(self.scores)] = self.scores
                         self.scores = new_scores
 
+                    # Update human verification status
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        loop.run_until_complete(self.update_human_verifications())
+                    except Exception as e:
+                        bt.logging.warning(f"Human verification update failed: {e}")
+                    finally:
+                        loop.close()
+
                     bt.logging.info(
                         f"Block: {self.metagraph.block.item()} | "
                         f"Peers: {n} | "
-                        f"Active scores: {(self.scores > 0).sum().item()}"
+                        f"Active scores: {(self.scores > 0).sum().item()} | "
+                        f"Verified humans: {len(self.verified_human_addresses)}"
                     )
 
                 step += 1

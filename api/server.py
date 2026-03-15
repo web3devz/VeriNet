@@ -28,6 +28,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from retrieval.retriever import EvidenceRetriever
 from retrieval.citation_checker import CitationChecker
+from waap import WaaPClient
+from passport import PassportClient, NetworkType, check_address_sync
 
 
 class VerificationEngine:
@@ -41,6 +43,8 @@ class VerificationEngine:
         self.netuid = netuid
         self.retriever = EvidenceRetriever()
         self.citation_checker = CitationChecker()
+        self.waap = WaaPClient()
+        self.passport = PassportClient(NetworkType.OPTIMISM)  # Default to Optimism network
         self.dendrite = None
 
         if subnet_mode:
@@ -293,6 +297,14 @@ class VeriNetAPIHandler(BaseHTTPRequestHandler):
             self._handle_verify()
         elif parsed.path == "/batch-verify":
             self._handle_batch_verify()
+        elif parsed.path == "/waap/signup":
+            self._handle_waap_signup()
+        elif parsed.path == "/waap/login":
+            self._handle_waap_login()
+        elif parsed.path == "/waap/logout":
+            self._handle_waap_logout()
+        elif parsed.path == "/passport/verify":
+            self._handle_passport_verify()
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -304,6 +316,12 @@ class VeriNetAPIHandler(BaseHTTPRequestHandler):
             self._send_json({"status": "ok", "version": "1.0.0"})
         elif parsed.path == "/stats":
             self._handle_stats()
+        elif parsed.path == "/waap/status":
+            self._handle_waap_status()
+        elif parsed.path.startswith("/passport/status"):
+            self._handle_passport_status()
+        elif parsed.path.startswith("/passport/check"):
+            self._handle_passport_check()
         elif parsed.path == "/":
             self._send_json({
                 "name": "VeriNet API",
@@ -313,6 +331,13 @@ class VeriNetAPIHandler(BaseHTTPRequestHandler):
                     "POST /batch-verify": "Verify multiple claims",
                     "GET /health": "Health check",
                     "GET /stats": "Benchmark statistics",
+                    "GET /waap/status": "WaaP agent authentication status",
+                    "POST /waap/signup": "Create new WaaP agent account",
+                    "POST /waap/login": "Authenticate existing WaaP agent",
+                    "POST /waap/logout": "Logout WaaP agent session",
+                    "GET /passport/status/{address}": "Get Passport.xyz verification status",
+                    "GET /passport/check/{address}/{type}": "Check specific Passport verification type",
+                    "POST /passport/verify": "Verify multiple addresses with Passport.xyz",
                 },
             })
         else:
@@ -389,6 +414,221 @@ class VeriNetAPIHandler(BaseHTTPRequestHandler):
         loader.load()
         self._send_json(loader.stats())
 
+    def _handle_waap_status(self):
+        """Return WaaP agent authentication status."""
+        self._send_json(self.engine.waap.get_status())
+
+    def _handle_waap_signup(self):
+        """Create a new WaaP agent account."""
+        try:
+            body = self._read_body()
+            email = body.get("email", "").strip()
+            password = body.get("password", "").strip()
+            name = body.get("name", "").strip()
+
+            if not email:
+                self._send_json({"success": False, "error": "Missing email"}, 400)
+                return
+
+            if not password:
+                self._send_json({"success": False, "error": "Missing password"}, 400)
+                return
+
+            if len(password) < 8:
+                self._send_json({"success": False, "error": "Password must be ≥ 8 characters"}, 400)
+                return
+
+            result = self.engine.waap.signup(email, password, name)
+            self._send_json(result)
+
+        except json.JSONDecodeError:
+            self._send_json({"success": False, "error": "Invalid JSON body"}, 400)
+        except Exception as e:
+            self._send_json({"success": False, "error": str(e)}, 500)
+
+    def _handle_waap_login(self):
+        """Authenticate with existing WaaP agent credentials."""
+        try:
+            body = self._read_body()
+            email = body.get("email", "").strip()
+            password = body.get("password", "").strip()
+
+            if not email or not password:
+                self._send_json({"success": False, "error": "Missing email or password"}, 400)
+                return
+
+            result = self.engine.waap.login(email, password)
+            self._send_json(result)
+
+        except json.JSONDecodeError:
+            self._send_json({"success": False, "error": "Invalid JSON body"}, 400)
+        except Exception as e:
+            self._send_json({"success": False, "error": str(e)}, 500)
+
+    def _handle_waap_logout(self):
+        """Logout WaaP agent session."""
+        try:
+            result = self.engine.waap.logout()
+            self._send_json(result)
+        except Exception as e:
+            self._send_json({"success": False, "error": str(e)}, 500)
+
+    def _handle_passport_status(self):
+        """Get Passport.xyz verification status for an address."""
+        parsed = urlparse(self.path)
+        path_parts = parsed.path.split("/")
+
+        if len(path_parts) < 4:
+            self._send_json({"error": "Missing address. Use: /passport/status/{address}"}, 400)
+            return
+
+        address = path_parts[3]
+        query_params = parse_qs(parsed.query)
+        network = query_params.get("network", ["optimism"])[0]
+
+        # Validate address format
+        if not self._is_valid_ethereum_address(address):
+            self._send_json({"error": "Invalid Ethereum address format. Address must be 42 characters starting with 0x."}, 400)
+            return
+
+        try:
+            network_type = NetworkType.OPTIMISM if network == "optimism" else NetworkType.BASE_SEPOLIA
+            status = check_address_sync(address, network_type)
+
+            response = {
+                "address": address,
+                "network": network,
+                "verified": status.is_verified,
+                "verification_count": status.verification_count,
+                "fully_verified": status.is_fully_verified,
+                "gov_id_verified": status.gov_id_verified,
+                "phone_verified": status.phone_verified,
+                "biometrics_verified": status.biometrics_verified,
+                "gov_id_expiry": status.gov_id_expiry,
+                "phone_expiry": status.phone_expiry,
+                "biometrics_expiry": status.biometrics_expiry,
+            }
+            self._send_json(response)
+
+        except ValueError as ve:
+            # Handle validation and API errors with specific messages
+            self._send_json({"error": str(ve)}, 400)
+        except Exception as e:
+            self._send_json({"error": f"Failed to check status: {str(e)}"}, 500)
+
+    def _handle_passport_check(self):
+        """Check specific Passport verification type for an address."""
+        parsed = urlparse(self.path)
+        path_parts = parsed.path.split("/")
+
+        if len(path_parts) < 5:
+            self._send_json({"error": "Missing parameters. Use: /passport/check/{address}/{type}"}, 400)
+            return
+
+        address = path_parts[3]
+        verification_type = path_parts[4]
+        query_params = parse_qs(parsed.query)
+        network = query_params.get("network", ["optimism"])[0]
+
+        if verification_type not in ["gov-id", "phone", "biometrics", "clean-hands"]:
+            self._send_json({"error": "Invalid type. Use: gov-id, phone, biometrics, or clean-hands"}, 400)
+            return
+
+        try:
+            import asyncio
+
+            async def check_single():
+                network_type = NetworkType.OPTIMISM if network == "optimism" else NetworkType.BASE_SEPOLIA
+                async with PassportClient(network_type) as client:
+                    if verification_type == "gov-id":
+                        result = await client.check_government_id(address)
+                    elif verification_type == "phone":
+                        result = await client.check_phone(address)
+                    elif verification_type == "biometrics":
+                        result = await client.check_biometrics(address)
+                    else:  # clean-hands
+                        result = await client.check_clean_hands(address)
+                    return result
+
+            result = asyncio.run(check_single())
+
+            response = {
+                "address": address,
+                "network": network,
+                "type": verification_type,
+                "verified": result.verified,
+                "expiration_date": result.expiration_date,
+            }
+            self._send_json(response)
+
+        except Exception as e:
+            self._send_json({"error": f"Failed to check {verification_type}: {str(e)}"}, 500)
+
+    def _handle_passport_verify(self):
+        """Verify multiple addresses with Passport.xyz."""
+        try:
+            body = self._read_body()
+            addresses = body.get("addresses", [])
+            network = body.get("network", "optimism")
+
+            if not addresses or not isinstance(addresses, list):
+                self._send_json({"error": "Missing 'addresses' array."}, 400)
+                return
+
+            if len(addresses) > 20:
+                self._send_json({"error": "Max 20 addresses per batch."}, 400)
+                return
+
+            network_type = NetworkType.OPTIMISM if network == "optimism" else NetworkType.BASE_SEPOLIA
+
+            import asyncio
+
+            async def batch_verify():
+                async with PassportClient(network_type) as client:
+                    tasks = [client.get_full_status(addr) for addr in addresses]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                    response_data = []
+                    for addr, result in zip(addresses, results):
+                        if isinstance(result, Exception):
+                            response_data.append({
+                                "address": addr,
+                                "error": str(result),
+                                "verified": False
+                            })
+                        else:
+                            response_data.append({
+                                "address": addr,
+                                "verified": result.is_verified,
+                                "verification_count": result.verification_count,
+                                "fully_verified": result.is_fully_verified,
+                                "gov_id_verified": result.gov_id_verified,
+                                "phone_verified": result.phone_verified,
+                                "biometrics_verified": result.biometrics_verified,
+                                "gov_id_expiry": result.gov_id_expiry,
+                                "phone_expiry": result.phone_expiry,
+                                "biometrics_expiry": result.biometrics_expiry,
+                            })
+
+                    return response_data
+
+            start = time.time()
+            results = asyncio.run(batch_verify())
+
+            response = {
+                "network": network,
+                "results": results,
+                "count": len(results),
+                "verified_count": sum(1 for r in results if r.get("verified", False)),
+                "latency_ms": round((time.time() - start) * 1000, 1),
+            }
+            self._send_json(response)
+
+        except json.JSONDecodeError:
+            self._send_json({"error": "Invalid JSON body."}, 400)
+        except Exception as e:
+            self._send_json({"error": str(e)}, 500)
+
     def _read_body(self) -> dict:
         """Read and parse the JSON request body."""
         content_length = int(self.headers.get("Content-Length", 0))
@@ -408,6 +648,15 @@ class VeriNetAPIHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def _is_valid_ethereum_address(self, address: str) -> bool:
+        """Validate Ethereum address format."""
+        return (
+            isinstance(address, str) and
+            address.startswith("0x") and
+            len(address) == 42 and
+            all(c in "0123456789abcdefABCDEF" for c in address[2:])
+        )
 
     def log_message(self, format, *args):
         """Override to use structured logging."""
