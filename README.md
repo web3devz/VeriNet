@@ -1,3 +1,5 @@
+<!-- MARKEE:START:0xc09273d23dc1862bc9e220c017ce79605e3c00e0 -->
+<!-- MARKEE:END:0xc09273d23dc1862bc9e220c017ce79605e3c00e0 -->
 # VeriNet — Decentralized Fact-Verification Subnet
 
 **Tagline:** Decentralized Fact-Verification Infrastructure for AI and the Open Web
