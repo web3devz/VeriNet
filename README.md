@@ -7,7 +7,7 @@
 >
 > 🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧
 >
-> *Change this message for 0.007 ETH on the [Markee App](https://markee.xyz/ecosystem/platforms/github/0xc09273d23dc1862bc9e220c017ce79605e3c00e0).*
+> *Change this message for 0.012 ETH on the [Markee App](https://markee.xyz/ecosystem/platforms/github/0xc09273d23dc1862bc9e220c017ce79605e3c00e0).*
 <!-- MARKEE:END:0xc09273d23dc1862bc9e220c017ce79605e3c00e0 -->
 # VeriNet — Decentralized Fact-Verification Subnet
 
