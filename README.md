@@ -1,14 +1,20 @@
-<!-- MARKEE:START:0xc09273d23dc1862bc9e220c017ce79605e3c00e0 -->
-> 🪧🪧🪧🪧🪧🪧🪧 MARKEE 🪧🪧🪧🪧🪧🪧🪧
->
-> gm🪧
->
-> 
->
-> 🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧🪧
->
-> *Change this message for 0.012 ETH on the [Markee App](https://markee.xyz/ecosystem/platforms/github/0xc09273d23dc1862bc9e220c017ce79605e3c00e0).*
-<!-- MARKEE:END:0xc09273d23dc1862bc9e220c017ce79605e3c00e0 -->
+<!-- MARKEE:START:0xd5e62eac5e144a0cb09774ae9285d50e88667dae -->
+```
+  ╔══════════════════════════════════════════════════════╗
+  ║                  ⡷⢾ ⣎⣱ ⣏⡱ ⣇⠜ ⣏⡉ ⣏⡉                 ║
+  ║                  ⠇⠸ ⠇⠸ ⠇⠱ ⠇⠱ ⠧⠤ ⠧⠤                 ║
+  ╠══════════════════════════════════════════════════════╣
+  ║                                                      ║
+  ║   gm🪧                                                ║
+  ║                                                      ║
+  ╠══════════════════════════════════════════════════════╣
+  ║                 0.012 ETH to change                  ║
+  ╚══════════════════════════════════════════════════════╝
+                 ││                      ││
+   ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+```
+*Show the world you support this repo! [Change this message at markee.xyz](https://markee.xyz/ecosystem/platforms/github/0xd5e62eac5e144a0cb09774ae9285d50e88667dae) ^*
+<!-- MARKEE:END:0xd5e62eac5e144a0cb09774ae9285d50e88667dae -->
 # VeriNet — Decentralized Fact-Verification Subnet
 
 **Tagline:** Decentralized Fact-Verification Infrastructure for AI and the Open Web
