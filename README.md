@@ -13,7 +13,7 @@
                  ││                      ││
    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 ```
-*Show the world you support this repo! [Change this message at markee.xyz](https://markee.xyz/ecosystem/platforms/github/0xe871f0282224ef727bfc69fc54ec3ebe2908f489) ^*
+*Show the world you support this repo! [Change this message at markee.xyz](https://markee.xyz/markee/0xe871f0282224ef727bfc69fc54ec3ebe2908f489) ^*
 <!-- MARKEE:END:0xe871f0282224ef727bfc69fc54ec3ebe2908f489 -->
 # VeriNet — Decentralized Fact-Verification Subnet
 
